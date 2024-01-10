@@ -50,7 +50,7 @@ def handle_client_request(resource, client_socket):
 
     elif uri in REDIRECTION_DICTIONARY.keys():
         response = f"HTTP/1.1 {REDIRECTION_DICTIONARY[uri]}\r\n\r\n"
-        client_socket.sendall(response.encode())
+        client_socket.send(response.encode())
         return
 
     elif not os.path.isfile(WEB_ROOT + uri):
