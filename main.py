@@ -1,4 +1,3 @@
-
 import os.path
 import socket
 
@@ -8,11 +7,11 @@ PORT = 80
 SOCKET_TIMEOUT = 2
 DEFAULT_URL = "/index.html"
 REDIRECTION_DICTIONARY = {"/forbidden": "403 FORBIDDEN", "/error": "500 INTERNAL SERVER ERROR"}
-MAX_PACKET=102400
+MAX_PACKET = 102400
 WEB_ROOT = "C:/Users/Public/pythonProject1/webroot"
 MOVED_RESPONSE = b'HTTP/1.1 302 MOVED TEMPORARILY\r\nLocation: /\r\n\r\n'
 ERROR_404 = b'HTTP/1.1 404 Not Found\r\n\r\n'
-ERROR_400= b'HTTP/1.1 400 BAD REQUEST\r\n\r\n'
+ERROR_400 = b'HTTP/1.1 400 BAD REQUEST\r\n\r\n'
 
 
 def get_file_data(file_name):
@@ -28,10 +27,11 @@ def get_file_data(file_name):
     return data
 
 
-def handle_client_request(resource, client_socket):
+def handle_client_request(resource, client_socket, kind_of_request, headers):
     """
     Check the required resource, generate proper HTTP response and send
     to client
+    :param kind_of_request:
     :param resource: the required resource
     :param client_socket: a socket for the communication with the client
     :return: None
@@ -39,7 +39,9 @@ def handle_client_request(resource, client_socket):
     """ """
     # TO DO : add code that given a resource (URL and parameters) generates
     # the proper response
-
+    http_header = ''
+    data = ''
+    http_response = ''
     if resource == '/':
         uri = DEFAULT_URL
     else:
@@ -48,6 +50,61 @@ def handle_client_request(resource, client_socket):
     if uri == "/moved":
         http_response = MOVED_RESPONSE
 
+    elif kind_of_request == 'POST' and uri.split('=')[0] == '/upload?file-name':
+        try:
+            filename = uri.split('=')[1]  # Assuming format: /upload?file-name=filename.ext
+            data = client_socket.recv(MAX_PACKET)
+            while len(data) < int((headers[1])):
+                data += client_socket.recv(MAX_PACKET)  # Receive until the end of the request
+
+            full_path = 'upload' + '/'+ filename
+            with open(full_path, "wb") as file:
+                file.write(data)
+
+
+            http_response = b"HTTP/1.1 200 OK\r\n\r\n"
+            client_socket.send(http_response)
+            return
+
+        except Exception as e:  # Handle any errors during file reception or saving
+            print(f"Error handling upload: {e}")
+            client_socket.send(ERROR_400)
+            return
+
+    elif uri.split('=')[0] == 'image?image-name':
+        try:
+            file_path = 'upload/' + uri.split('=')[1]
+            with open(file_path, 'rb') as f:
+                data = f.read()
+        except Exception:
+            client_socket.send(ERROR_400)
+            return
+
+
+
+    elif uri.split('=')[0] == "/calculate-next?num":
+        try:
+            num = int(uri.split('=')[-1])
+            http_header = "Content-Type: text/plain\r\n"
+            data = (str(num + 1)).encode()
+        except ValueError or KeyboardInterrupt:
+            client_socket.send(ERROR_400)
+            return
+
+    elif uri.split('?')[0] == "/calculate-area" and (
+            uri.split('?')[-1].split('&')[0].split('=')[0] == 'height' or uri.split('?')[-1].split('&')[0].split('=')[0]
+            == 'width') and (
+            uri.split('?')[-1].split('&')[-1].split('=')[0] == 'width' or
+            uri.split('?')[-1].split('&')[-1].split('=')[0] == 'height'):
+        try:
+            params = uri.split('?')[1].split('&')
+            height = float(params[0].split('=')[-1])  # Extract height
+            width = float(params[1].split('=')[-1])  # Extract width
+            http_header = "Content-Type: text/plain\r\n"
+            data = (str(0.5 * width * height)).encode()
+        except ValueError or KeyboardInterrupt:
+            client_socket.send(ERROR_400)
+            return
     elif uri in REDIRECTION_DICTIONARY.keys():
         response = f"HTTP/1.1 {REDIRECTION_DICTIONARY[uri]}\r\n\r\n"
         client_socket.send(response.encode())
@@ -59,12 +116,11 @@ def handle_client_request(resource, client_socket):
         return
     # TO DO: check if URL had been redirected, not available or other error
     # code. For example:
-        # TO DO: send 302 redirection response
+    # TO DO: send 302 redirection response
 
     else:
-        response_line = "HTTP/1.1 200 OK\r\n"
         http_header = ''
-        # TO DO: extract requested file tupe from URL (html, jpg etc)
+        # TO DO: extract requested file type from URL (html, jpg etc)
         file_type = uri.split(".")[-1]
         if file_type == 'html':
             http_header = "Content-Type: text/html; charset=utf-8\r\n"
@@ -82,9 +138,10 @@ def handle_client_request(resource, client_socket):
             http_header = "Content-Type: image/jpeg\r\n"
         elif file_type == 'png':
             http_header = "Content-Type: image/x-icon\r\n"
-
-        # TO DO: read the data from the file
         data = get_file_data(uri)
+        # TO DO: read the data from the file
+    if not uri == "/moved":
+        response_line = "HTTP/1.1 200 OK\r\n"
         http_header = http_header + "Content-Length:" + str(len(data)) + "\r\n\r\n"
         http_response = response_line.encode() + http_header.encode() + data
     client_socket.send(http_response)
@@ -99,12 +156,22 @@ def validate_http_request(request):
     the requested resource )
     """
     cmd = request.split(' ')
-    if len(cmd)<3:
-        return False, ""
-    if cmd[0] != 'GET' or cmd[2][:10] != 'HTTP/1.1\r\n':
-        return False, ""
-    return True, cmd[1]
-
+    if len(cmd) < 3:
+        return False, "", '', []
+    if (cmd[0] != 'GET' and cmd[0] != 'POST') or cmd[2][:10] != 'HTTP/1.1\r\n':
+        return False, "", '', []
+    if cmd[0] == 'GET':
+        return True, cmd[1], cmd[0], []
+    content_type=''
+    content_length=''
+    for i in range(len(cmd)):
+        if cmd[i].endswith("Content-Type:"):
+            content_type = cmd[i+1]
+            content_type = content_type[:content_type.find("\r\n")]
+        if cmd[i].endswith("Content-Length:"):
+            content_length =cmd[i+1]
+            content_length = content_length[:content_length.find("\r\n")]
+    return True, cmd[1], cmd[0], [content_type, content_length]
 
 def handle_client(client_socket):
     """
@@ -120,11 +187,11 @@ def handle_client(client_socket):
             while client_request[-4:] != '\r\n\r\n':
                 client_request += client_socket.recv(MAX_PACKET).decode('utf-8')  # Decode bytes to string
 
-            valid_http, resource = validate_http_request(client_request)
+            valid_http, resource, kind_of_request, headers = validate_http_request(client_request)
 
             if valid_http:
                 print('Got a valid HTTP request')
-                handle_client_request(resource, client_socket)
+                handle_client_request(resource, client_socket, kind_of_request, headers)
                 break  # Exit the loop after handling a valid request
             else:
 
