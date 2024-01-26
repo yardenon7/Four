@@ -129,9 +129,14 @@ def handle_client_request(resource, client_socket, kind_of_request, headers):
 
     elif uri.split('=')[0] == REQUEST_GET_IMAGE:
         try:
-            file_path = UPLOAD + uri.split('=')[1]
-            with open(file_path, 'rb') as f:
-                data = f.read()
+            ending = uri.split('=')[1].split('.')[1]
+            if ending != 'jpeg' and ending != FILE_TYPE_JPG and ending != FILE_TYPE_PNG:
+                t = True
+                http_response = ERROR_400
+            else:
+                file_path = UPLOAD + uri.split('=')[1]
+                with open(file_path, 'rb') as f:
+                    data = f.read()
         except Exception as e:
             print(f"Error handling GetImage: {e}")
             t = True
